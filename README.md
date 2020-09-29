@@ -1,0 +1,1 @@
+# go-manage-sonoff
