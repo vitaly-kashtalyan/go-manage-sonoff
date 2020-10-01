@@ -1,0 +1,20 @@
+[
+  {
+    "id": 1,
+    "name": "Sonoff MINI",
+    "host": "192.168.0.194:3000",
+    "enable": true
+  },
+  {
+    "id": 2,
+    "name": "Sonoff BASICR3",
+    "host": "localhost:3000",
+    "enable": true
+  },
+  {
+    "id": 3,
+    "name": "Sonoff RFR3",
+    "host": "localhost:3000",
+    "enable": false
+  }
+]
