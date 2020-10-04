@@ -1,20 +1,17 @@
 [
   {
-    "id": 1,
+    "id": "1000e5421c",
     "name": "Sonoff MINI",
-    "host": "192.168.0.194:3000",
-    "enable": true
+    "host": "192.168.0.194:8081"
   },
   {
-    "id": 2,
+    "id": "1000bbccaa",
     "name": "Sonoff BASICR3",
-    "host": "localhost:3000",
-    "enable": true
+    "host": "192.168.0.185:8081"
   },
   {
-    "id": 3,
+    "id": "1000aabbcc",
     "name": "Sonoff RFR3",
-    "host": "localhost:3000",
-    "enable": false
+    "host": "localhost:3000"
   }
 ]
