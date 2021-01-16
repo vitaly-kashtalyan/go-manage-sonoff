@@ -1,7 +1,11 @@
-FROM golang:1.14-alpine
+FROM golang:1.15-alpine AS build
 WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
-COPY . .
+COPY main.go .
 RUN go build -o main .
+
+FROM alpine:latest
+COPY --from=build /app/main .
+COPY config/devices.json config/devices.json
 CMD ["./main"]

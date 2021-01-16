@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"github.com/gin-gonic/gin"
@@ -9,12 +10,22 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"os"
+	"strings"
 )
 
-type devices []struct {
+const (
+	ENABLE         = "on"
+	MqttSenderHost = "MQTT_SENDER_HOST"
+	HomeSonoff     = "home/sonoff/state"
+)
+
+type devices []device
+
+type device struct {
 	DeviceId string `json:"id" binding:"required"`
 	Name     string `json:"name"`
 	Host     string `json:"host" binding:"required"`
+	Enable   bool   `json:"enable"`
 }
 
 type errorMsg struct {
@@ -22,10 +33,24 @@ type errorMsg struct {
 	Message string `json:"message"`
 }
 
+type Switcher struct {
+	DeviceId string `json:"deviceid"`
+	Data     struct {
+		Switch string `json:"switch"`
+	} `json:"data"`
+}
+
+type Message struct {
+	Topic    string `json:"topic"`
+	Qos      int    `json:"qos"`
+	Retained bool   `json:"retained"`
+	Payload  string `json:"payload"`
+}
+
 func init() {
 	_, isPresent := os.LookupEnv("DEVICES_FILE")
 	if !isPresent {
-		_ = os.Setenv("DEVICES_FILE", "devices.json")
+		_ = os.Setenv("DEVICES_FILE", "config/devices.json")
 	}
 	fmt.Println("DEVICES_FILE:", os.Getenv("DEVICES_FILE"))
 }
@@ -52,7 +77,7 @@ func main() {
 
 	r.POST("/device/:id/*proxyPath", proxy)
 
-	r.Run() // listen and serve on 0.0.0.0:8080 (for windows "localhost:8080")
+	_ = r.Run() // listen and serve on 0.0.0.0:8080 (for windows "localhost:8080")
 }
 
 func getDevices() (d devices, err error) {
@@ -78,7 +103,8 @@ func getDevices() (d devices, err error) {
 }
 
 func proxy(c *gin.Context) {
-	host, err := getHostById(c.Param("id"))
+	id := c.Param("id")
+	device, err := getHostById(id)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, errorMsg{
 			Status:  http.StatusText(http.StatusInternalServerError),
@@ -87,15 +113,23 @@ func proxy(c *gin.Context) {
 		return
 	}
 
-	if host == "" {
+	if device.Host == "" {
 		c.JSON(http.StatusBadRequest, errorMsg{
 			Status:  http.StatusText(http.StatusBadRequest),
-			Message: "invalid device id: " + c.Param("id"),
+			Message: "invalid device id: " + id,
 		})
 		return
 	}
 
-	remote, err := url.Parse("http://" + host)
+	if device.Enable == false {
+		c.JSON(http.StatusConflict, errorMsg{
+			Status:  http.StatusText(http.StatusConflict),
+			Message: "The device is turned off: " + id,
+		})
+		return
+	}
+
+	remote, err := url.Parse("http://" + device.Host)
 	if err != nil {
 		fmt.Println(err)
 		c.JSON(http.StatusBadRequest, errorMsg{
@@ -104,6 +138,7 @@ func proxy(c *gin.Context) {
 		})
 		return
 	}
+	sendMqttMessage(id, c)
 
 	proxy := httputil.NewSingleHostReverseProxy(remote)
 	proxy.Director = func(req *http.Request) {
@@ -116,12 +151,61 @@ func proxy(c *gin.Context) {
 	proxy.ServeHTTP(c.Writer, c.Request)
 }
 
-func getHostById(id string) (host string, err error) {
+func sendMqttMessage(id string, c *gin.Context) {
+	var jsonBody Switcher
+	err := c.Bind(&jsonBody)
+	if err == nil && strings.HasSuffix(c.Request.RequestURI, "zeroconf/switch") &&
+		id == c.Request.RequestURI[8:18] && jsonBody.Data.Switch != "" {
+		msg := Message{
+			Topic:    HomeSonoff,
+			Qos:      2,
+			Retained: false,
+			Payload:  fmt.Sprintf("%s,id=%s value=%v", "sonoff", id, getState(jsonBody.Data.Switch)),
+		}
+		err = sendMessage(msg)
+		if err != nil {
+			fmt.Println("error sending mqtt:", err)
+		}
+	}
+
+}
+
+func getState(state string) (v bool) {
+	v = false
+	if state == ENABLE {
+		v = true
+	}
+	return
+}
+
+func sendMessage(message Message) error {
+	uri := fmt.Sprintf("http://%s/publish", getMqttSenderHost())
+	body := new(bytes.Buffer)
+	err := json.NewEncoder(body).Encode(message)
+	if err != nil {
+		return fmt.Errorf("%q: %v", uri, err)
+	}
+	resp, err := http.Post(uri, "application/json; charset=utf-8", body)
+	if err != nil {
+		return fmt.Errorf("cannot fetch URL %q: %v", uri, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		return fmt.Errorf("unexpected http POST status: %s", resp.Status)
+	}
+	return nil
+}
+
+func getMqttSenderHost() string {
+	return os.Getenv(MqttSenderHost)
+}
+
+func getHostById(id string) (device device, err error) {
 	devices, err := getDevices()
 	if err == nil {
-		for _, device := range devices {
-			if device.DeviceId == id {
-				host = device.Host
+		for _, d := range devices {
+			if d.DeviceId == id {
+				device = d
 			}
 		}
 	}

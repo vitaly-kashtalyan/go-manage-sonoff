@@ -6,8 +6,9 @@ services:
     restart: always
     container_name: manage_sonoff_app
     environment:
-      - DEVICES_FILE=devices.json
-      - GIN_MODE=release
+      DEVICES_FILE: config/devices.json
+      GIN_MODE: release
+      MQTT_SENDER_HOST: mqttsender:8075
     ports:
       - 8088:8080
     tty: true
