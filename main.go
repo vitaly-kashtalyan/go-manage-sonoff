@@ -57,6 +57,8 @@ func init() {
 
 func main() {
 	r := gin.Default()
+	r.Use(sendMqttMessage())
+
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
 			"status": http.StatusText(http.StatusOK),
@@ -138,7 +140,6 @@ func proxy(c *gin.Context) {
 		})
 		return
 	}
-	sendMqttMessage(id, c)
 
 	proxy := httputil.NewSingleHostReverseProxy(remote)
 	proxy.Director = func(req *http.Request) {
@@ -151,23 +152,29 @@ func proxy(c *gin.Context) {
 	proxy.ServeHTTP(c.Writer, c.Request)
 }
 
-func sendMqttMessage(id string, c *gin.Context) {
-	var jsonBody Switcher
-	err := c.Bind(&jsonBody)
-	if err == nil && strings.HasSuffix(c.Request.RequestURI, "zeroconf/switch") &&
-		id == c.Request.RequestURI[8:18] && jsonBody.Data.Switch != "" {
-		msg := Message{
-			Topic:    HomeSonoff,
-			Qos:      2,
-			Retained: false,
-			Payload:  fmt.Sprintf("%s,id=%s value=%v", "sonoff", id, getState(jsonBody.Data.Switch)),
-		}
-		err = sendMessage(msg)
-		if err != nil {
-			fmt.Println("error sending mqtt:", err)
+func sendMqttMessage() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var bodyBytes []byte
+		var jsonBody Switcher
+
+		if c.Request.Body != nil {
+			bodyBytes, _ = ioutil.ReadAll(c.Request.Body)
+			c.Request.Body = ioutil.NopCloser(bytes.NewBuffer(bodyBytes))
+			err := json.Unmarshal(bodyBytes, &jsonBody)
+			if err == nil && strings.HasSuffix(c.Request.RequestURI, "zeroconf/switch") && jsonBody.Data.Switch != "" {
+				msg := Message{
+					Topic:    HomeSonoff,
+					Qos:      2,
+					Retained: false,
+					Payload:  fmt.Sprintf("%s,id=%s value=%v", "sonoff", c.Request.RequestURI[8:18], getState(jsonBody.Data.Switch)),
+				}
+				err = sendMessage(msg)
+				if err != nil {
+					fmt.Println("error sending mqtt:", err)
+				}
+			}
 		}
 	}
-
 }
 
 func getState(state string) (v bool) {
